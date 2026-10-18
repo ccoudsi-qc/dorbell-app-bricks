@@ -1,0 +1,22 @@
+# face-recognition-runner — Python deps.
+#
+# NOTE: the real install is driven by the Dockerfile, not `pip install -r` on this
+# file, because install ORDER matters (see below). This file documents the deps.
+#
+# The NPU path uses onnxruntime-qnn==2.7.0 — a linux-aarch64/cp313 wheel that bundles
+# its OWN version-matched QNN runtime (QNN/QAIRT 2.51, incl. the v75 HTP skels). Do
+# NOT also forward the board's /usr/share/qcom skels into the container and point
+# ADSP_LIBRARY_PATH at them: that mixes QNN generations and the HTP session fails
+# (QNN_DEVICE_ERROR_INVALID_CONFIG) then silently falls back to CPU. The runner sets
+# ADSP_LIBRARY_PATH to the wheel's own skel dir at startup.
+#
+# Install order (Dockerfile): insightface + the light deps FIRST (insightface pulls
+# plain onnxruntime 1.31 as a dependency), THEN onnxruntime-qnn==2.7.0 last so its
+# onnxruntime wins. If you ever `pip install -r` this file directly, do it in two
+# steps to preserve that order.
+insightface              # ONLY for insightface.utils.face_align.norm_crop (5-pt align)
+opencv-python-headless
+numpy
+websockets               # results channel (ws :4912)
+
+onnxruntime-qnn==2.7.0   # QNN plugin-EP + bundled v75 skels. MUST install last.

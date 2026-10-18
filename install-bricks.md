@@ -1,0 +1,197 @@
+# Install the Dragonwing Doorbell on a fresh Ventuno Q
+
+This takes a **fresh Ventuno Q** (`arduino,monza` / QCS8300, HTP v75) running
+**Ubuntu** with **Arduino App Lab** to a running face-recognition doorbell. It
+assumes nothing beyond a flashed board and network access.
+
+> Verified on-board 2026-10-18 (Ventuno Q "Monaco Monza addons", Ubuntu 24.04,
+> `arduino-app-cli` 0.13.0 / App Lab 0.10.0, Docker 29.1.3, assets version 0.12.0).
+
+The end state: two containers (the `web_ui` webview + the NPU
+**face-recognition-runner**) running under App Lab, the doorbell UI live at
+`http://<board>:7000`, recognition on the **HTP v75** NPU.
+
+---
+
+## 0. Prerequisites
+
+On the board you need, already installed by the Ubuntu + App Lab image:
+
+- **Arduino App Lab** and `arduino-app-cli` on `PATH` (`arduino-app-cli version`).
+- **Docker** running and usable by your user (`docker ps` works without sudo —
+  if not, `sudo usermod -aG docker $USER` then re-login).
+- The stock App Lab data dir at `/var/lib/arduino-app-cli/assets/<ver>/` (this is
+  what the private-data-dir launcher symlinks against).
+
+Confirm:
+
+```bash
+arduino-app-cli version
+docker ps
+ls /var/lib/arduino-app-cli/assets        # e.g. 0.12.0
+```
+
+A USB webcam and an HDMI display are **not** required on the board itself — the UI
+is a webview you open from any browser on the network. (The camera the demo reads
+is whatever App Lab's camera brick exposes to the runner; see the app README.)
+
+---
+
+## 1. Get the app onto the board
+
+Clone this repo (or copy just the app folder) into App Lab's apps directory —
+typically `~/ArduinoApps/`:
+
+```bash
+mkdir -p ~/ArduinoApps
+cd ~/ArduinoApps
+git clone https://github.com/munoz0raul/dorbell-app-bricks.git
+# App Lab looks for an app folder with an app.yaml:
+ln -s dorbell-app-bricks/inspirational/platform_ventunoq/dragonwing-doorbell \
+      ~/ArduinoApps/dragonwing-doorbell
+```
+
+(You can also copy the `dragonwing-doorbell/` folder directly to
+`~/ArduinoApps/dragonwing-doorbell` — the symlink just avoids duplicating files.)
+
+---
+
+## 2. Stage the NPU models
+
+The `buffalo_sc` ONNX models are **not committed** (large, board-pinned). Stage
+them under `runner/models/buffalo_sc/` before building the runner image. If the
+board has internet egress, let InsightFace fetch the pack once:
+
+```bash
+pip3 install --break-system-packages insightface onnxruntime
+python3 - <<'PY'
+from insightface.app import FaceAnalysis
+FaceAnalysis(name="buffalo_sc", providers=["CPUExecutionProvider"]).prepare(ctx_id=-1, det_size=(320,320))
+PY
+# -> ~/.insightface/models/buffalo_sc/{det_500m,w600k_mbf}.onnx
+
+mkdir -p ~/ArduinoApps/dorbell-app-bricks/runner/models/buffalo_sc
+cp ~/.insightface/models/buffalo_sc/det_500m.onnx \
+   ~/.insightface/models/buffalo_sc/w600k_mbf.onnx \
+   ~/ArduinoApps/dorbell-app-bricks/runner/models/buffalo_sc/
+```
+
+(Alternatively, mount the models at runtime to `/opt/models/buffalo_sc` and skip
+the COPY — see [`runner/README.md`](runner/README.md).)
+
+---
+
+## 3. Build the NPU runner image
+
+The brick's companion container runs InsightFace on the HTP v75 via
+`onnxruntime-qnn`. Build it **from the repo root** so the build context includes
+`runner/`:
+
+```bash
+cd ~/ArduinoApps/dorbell-app-bricks
+docker build -t ghcr.io/arduino/app-bricks/face-recognition-runner:0.1.0 \
+  -f runner/Dockerfile .
+```
+
+The brick compose references
+`${DOCKER_REGISTRY_BASE:-ghcr.io/arduino/}app-bricks/face-recognition-runner:0.1.0`
+— so tagging it under `ghcr.io/arduino/` locally (as above) lets App Lab find it
+with no registry push. If you push it elsewhere, set `DOCKER_REGISTRY_BASE`.
+
+> **Why no host QNN libs?** `onnxruntime-qnn` bundles its own version-matched QNN
+> 2.51 runtime (including the v75 skels). The compose forwards only the
+> kernel-coupled plumbing (`/dev/fastrpc-cdsp`, `/dev/dma_heap/system`). Full
+> rationale + the `ADSP_LIBRARY_PATH` skew gotcha are in
+> [`runner/README.md`](runner/README.md).
+
+---
+
+## 4. Start the app
+
+A plain `arduino-app-cli app start` **fails** here, because the
+`arduino:face_recognition` brick lives *inside* the app and so is absent from the
+stock static registry:
+
+```
+[ERROR] Brick "arduino:face_recognition" Not Found
+```
+
+`run_applab.sh` solves this without editing a single stock file: it builds a
+**private data dir** (`ARDUINO_APP_CLI__DATA_DIR`) whose registry = stock + our
+brick, regenerated with the **same provisioner the daemon uses**, then starts the
+app against it.
+
+```bash
+cd ~/ArduinoApps/dragonwing-doorbell
+bash run_applab.sh
+```
+
+| Command | Effect |
+|---------|--------|
+| `bash run_applab.sh` | build the private data dir (if needed) + `app start` |
+| `bash run_applab.sh --rebuild` | force-refresh the data dir, then start |
+| `bash run_applab.sh --setup-only` | build the data dir, don't start |
+| `bash run_applab.sh --stop` | stop the running app |
+
+> `app start` is **state-changing** — it stops any running app and rebuilds the
+> compose. Coordinate before running it on a shared board.
+
+---
+
+## 5. Open the webview
+
+App Lab opens the webview automatically; otherwise browse to:
+
+```
+http://<board>:7000
+```
+
+You should see the live camera canvas. Enrollment is normally automatic (show a
+LinkedIn QR to the camera). From the browser you can also drive the flows by key:
+
+| Key | Action |
+|-----|--------|
+| `G` | authorize a guest (same flow as a LinkedIn QR) |
+| `C` | clear the face database |
+| `[` / `]` | decrease / increase the idle timeout (5–60 s) |
+| `-` / `=` | decrease / increase the enrolled-face TTL (60–600 s) |
+| `Esc` | back to Standby |
+| `Q` | quit the app loop |
+
+---
+
+## 6. Verify the NPU is actually in use
+
+CPU fallback is **silent** — always confirm. Check the runner's logs:
+
+```bash
+docker logs <face-recognition-runner container> 2>&1 | grep -i qnn
+```
+
+Expect:
+
+```
+[runner] QNN registered — qnn_version=2.51.0 adsp=…/onnxruntime_qnn
+[runner] engine ready — det/rec providers=['QNNExecutionProvider', 'CPUExecutionProvider']
+```
+
+A providers list that **starts** with `CPUExecutionProvider` means QNN didn't load
+— see the `ADSP_LIBRARY_PATH` skew gotcha in [`runner/README.md`](runner/README.md).
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| `Brick "arduino:face_recognition" Not Found` | You ran a plain `app start`. Use `run_applab.sh` (step 4). |
+| Webview stuck at "Connecting… / offline" | The bundled Socket.IO client (`assets/libs/socket.io.min.js`) must match the server's Socket.IO v4. It's committed in this repo; don't point the script tag at `/socket.io/socket.io.js` (that's the Engine.IO server, which returns HTTP 400). |
+| Runner can't find the models | Stage them in `runner/models/buffalo_sc/` before building (step 2), or mount them at `/opt/models/buffalo_sc`. |
+| `providers` starts with `CPUExecutionProvider` | HTP didn't initialize. Confirm `/dev/fastrpc-cdsp` + `/dev/dma_heap/system` are forwarded (they're in `brick_compose.ventunoq.yaml`) and that `ADSP_LIBRARY_PATH` points at the wheel's skels, not the board's. |
+| Compose can't pull the runner image | Build it locally tagged under `ghcr.io/arduino/` (step 3), or set `DOCKER_REGISTRY_BASE`. |
+
+---
+
+See the app's [README](inspirational/platform_ventunoq/dragonwing-doorbell/README.md)
+for the architecture, and [munoz0raul/dorbell](https://github.com/munoz0raul/dorbell)
+for the production (IQ-8275) side of the same demo.

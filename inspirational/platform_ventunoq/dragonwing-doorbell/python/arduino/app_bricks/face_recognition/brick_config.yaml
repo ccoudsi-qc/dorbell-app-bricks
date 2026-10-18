@@ -1,0 +1,54 @@
+# arduino:face_recognition — brick manifest (app-local, Ventuno Q)
+#
+# Discovered by `arduino-bricks-list-modules` because this brick lives on the
+# app's import path at <app>/python/arduino/app_bricks/face_recognition/.
+# Keyed by the bare brick name (face_recognition); the `arduino:` prefix is the
+# registry id form.
+id: arduino:face_recognition
+name: Face Recognition
+description: >
+  Face detection + 512-d ArcFace embeddings on the HTP v75 NPU (InsightFace
+  buffalo_sc via onnxruntime-qnn). Returns raw faces with embeddings over a
+  websocket; the app owns identity matching, the TTL store and enrollment.
+category: ai
+
+# This brick runs a companion container (the NPU runner). The container flag is
+# NOT read from this file — module_listing derives it purely from the presence of
+# brick_compose.yaml (base name). Both brick_compose.yaml and
+# brick_compose.ventunoq.yaml MUST ship or the runner service is never merged
+# into app-compose.yaml. This key is kept for documentation only (stock bricks
+# spell it `requires_container`).
+requires_container: true
+
+# MUST be false. When true, the daemon bind-mounts the WHOLE host /dev into the
+# runner (-v /dev:/dev) WITHOUT the matching device-cgroup allow rules. That bind
+# shadows /dev/fastrpc-cdsp so QNN HTP device creation fails with
+# QNN_DEVICE_ERROR_INVALID_CONFIG and the session silently falls back to CPU
+# (isolated on-board 2026-10-18: discrete --device → HTP, -v /dev:/dev → CPU).
+# The stock NPU bricks (object_detection, gesture_recognition) all set this False
+# and forward ONLY the two discrete nodes via the compose `devices:` list — which
+# is exactly what our brick_compose.ventunoq.yaml does. Keep it false.
+mount_devices_into_container: false
+
+ports:
+  - 4912   # results: JSON faces over websocket (runner -> client)
+  - 5050   # frames:  length-prefixed JPEG (client -> runner)
+
+supported_boards:
+  - ventunoq
+
+ai_frameworks_compatibility:
+  - onnx
+
+# Tunables surfaced to the app (optional; defaults match doorbell_core).
+# Schema (verified on-board): a LIST of {name, description, default_value, hidden}
+# dicts — NOT a dict-of-dicts. module_listing.to_dict() iterates these calling
+# var.get("name"), so the dict-of-dicts form crashes discovery with
+# AttributeError: 'str' object has no attribute 'get'.
+variables:
+  - name: FACE_RECOGNITION_DET_THRESHOLD
+    description: Minimum detection score to emit a face.
+    default_value: "0.5"
+  - name: FACE_RECOGNITION_JPEG_QUALITY
+    description: JPEG quality for frames streamed to the runner.
+    default_value: "80"

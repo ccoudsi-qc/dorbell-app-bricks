@@ -1,0 +1,21 @@
+# Dragonwing Doorbell — Arduino App Lab app descriptor (Ventuno Q)
+#
+# `app new` does NOT populate bricks: (it stays []), so this list is authored by
+# hand (verified on the board). Keyed by the arduino:<name> id form.
+#
+# Bricks:
+#   arduino:face_recognition  — our app-local custom brick (python/arduino/app_bricks/)
+#                               detection + embeddings on the HTP v75 NPU runner
+#   arduino:web_ui            — the display surface: a webview served at :7000.
+#                               We stream the composited cv2 canvas into it as JPEG
+#                               and receive key events back (see python/main.py).
+name: Dragonwing Doorbell
+icon: 🔔
+description: >
+  Autonomous face-recognition doorbell. InsightFace buffalo_sc on the HTP v75
+  NPU; QR-triggered enrollment; 2-minute in-memory TTL store. The full cv2 UI
+  from the production doorbell is streamed into a web_ui webview.
+
+bricks:
+  - arduino:face_recognition
+  - arduino:web_ui

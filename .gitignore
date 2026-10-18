@@ -1,0 +1,16 @@
+# Staged NPU models for the runner image — large, board-pinned, not committed.
+# Stage them under runner/models/buffalo_sc/ before building the runner image
+# (see runner/README.md); the production doorbell downloads the same pack to
+# ~/.insightface/models/buffalo_sc.
+runner/models/
+*.onnx
+
+# Private App Lab data dir built by run_applab.sh (symlinks + regenerated registry)
+.doorbell-datadir/
+
+# Build junk
+*.whl.installed
+.cache/
+__pycache__/
+*.pyc
+.DS_Store

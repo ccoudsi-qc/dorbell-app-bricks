@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Dragonwing Doorbell</title>
+  <!-- Socket.IO client, bundled locally under assets/libs/ (served as a static
+       asset by web_ui), matching the stock App Lab examples' assets/libs layout.
+       The web_ui brick mounts the Engine.IO SERVER at /socket.io, so it does NOT
+       serve a client library there — requesting /socket.io/socket.io.js returns a
+       400 "unsupported version" from the engine. We ship our own 4.x client
+       (matches the brick's python-socketio 5.x / engineio 4.x) so the demo also
+       works on an isolated network with no CDN egress. -->
+  <script src="libs/socket.io.min.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #1a0040; overflow: hidden;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    /* Full-bleed canvas stream. The server renders the whole 1920x1080 UI
+       (incl. HUD + stats), so the page is just a viewport — object-fit:contain
+       keeps the aspect ratio and letterboxes on off-ratio displays. */
+    #stage {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #1a0040;
+    }
+    #frame {
+      max-width: 100%; max-height: 100%;
+      width: auto; height: auto;
+      object-fit: contain;
+      image-rendering: auto;
+    }
+    #overlay {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      padding: 10px 16px;
+      font-size: 13px; letter-spacing: .02em;
+      color: #c9a9ff; background: linear-gradient(transparent, rgba(0,0,0,.45));
+      display: flex; gap: 18px; justify-content: center;
+      opacity: .0; transition: opacity .25s;
+      pointer-events: none;
+    }
+    #stage:hover #overlay { opacity: .9; }
+    #overlay b { color: #f0e6ff; font-weight: 600; }
+    #status {
+      position: fixed; top: 10px; right: 14px;
+      font-size: 12px; color: #8f7bbf;
+    }
+    #status.live { color: #7ee08a; }
+    kbd {
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+      border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, monospace;
+      color: #f0e6ff;
+    }
+    #waiting {
+      position: fixed; inset: 0; display: flex; align-items: center;
+      justify-content: center; color: #c9a9ff; font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage" tabindex="0">
+    <img id="frame" alt="" />
+    <div id="waiting">Connecting to doorbell…</div>
+    <div id="overlay">
+      <span><kbd>O</kbd> enroll</span>
+      <span><kbd>G</kbd> guest</span>
+      <span><kbd>C</kbd> clear</span>
+      <span><kbd>[</kbd> <kbd>]</kbd> idle</span>
+      <span><kbd>-</kbd> <kbd>=</kbd> store</span>
+      <span><kbd>Esc</kbd> standby</span>
+      <span><kbd>Q</kbd> quit</span>
+    </div>
+  </div>
+  <div id="status">offline</div>
+
+  <script>
+    (function () {
+      const img = document.getElementById('frame');
+      const waiting = document.getElementById('waiting');
+      const statusEl = document.getElementById('status');
+      const stage = document.getElementById('stage');
+
+      const socket = io({ transports: ['websocket', 'polling'] });
+
+      socket.on('connect', () => {
+        statusEl.textContent = 'live';
+        statusEl.classList.add('live');
+      });
+      socket.on('disconnect', () => {
+        statusEl.textContent = 'offline';
+        statusEl.classList.remove('live');
+      });
+
+      // Server streams the composited 1920x1080 canvas as base64 JPEG.
+      let lastUrl = null;
+      socket.on('frame', (data) => {
+        if (!data || !data.jpeg) return;
+        if (waiting.style.display !== 'none') waiting.style.display = 'none';
+        // Reuse a single object: data: URL is simplest and avoids blob churn.
+        img.src = 'data:image/jpeg;base64,' + data.jpeg;
+      });
+
+      // Forward keystrokes to the app (replaces cv2.waitKey on the device).
+      // We send a normalized key name the Python side maps 1:1.
+      function sendKey(name) { socket.emit('key', { key: name }); }
+
+      window.addEventListener('keydown', (e) => {
+        let name = e.key;
+        if (name === 'Escape') name = 'escape';
+        else if (name === 'Enter') name = 'enter';
+        else if (name.length === 1) name = name.toLowerCase();
+        else return; // ignore Shift/Arrows/etc.
+        // Keys the app understands.
+        const allowed = new Set(['o','b','g','c','[',']','-','=','+','q','escape']);
+        if (!allowed.has(name)) return;
+        e.preventDefault();
+        sendKey(name);
+      });
+
+      // Keep focus so keydown is captured even after clicking the stream.
+      stage.focus();
+      stage.addEventListener('click', () => stage.focus());
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# Extra PyPI deps for the Dragonwing Doorbell app, installed into the uv venv by
+# the base image's run.sh (on top of the system site-packages).
+#
+# The app container runs doorbell_core (the whole UI/state machine): QRDetector,
+# every draw_* compositor, StatsMonitor. So it needs cv2 + numpy + psutil. It
+# does NOT need insightface or qai-appbuilder — those are imported lazily and
+# only on code paths that now live in the NPU RUNNER (CPU FaceEngine, align_crop
+# via norm_crop). Keeping them out of the app keeps it light.
+#
+# DO NOT list opencv-python-headless or numpy here. The base image already ships
+# them in its system site-packages (cv2 4.13.0, numpy 2.5.x), and the venv is
+# created with --system-site-packages so they are already importable. Worse, the
+# base's cv2 is a CUSTOM build tagged with a PyPI-local version
+# (opencv-python-headless==4.13.0+1ddb20b) that does NOT exist on any index — so
+# listing it makes `uv pip install -r` fail resolution and install NOTHING,
+# leaving psutil/websocket-client/pyyaml missing (web_ui never binds, StatsMonitor
+# crashes). Verified on-board 2026-10-18. List ONLY deps the base lacks:
+psutil               # StatsMonitor telemetry thread (CPU%, mem)
+websocket-client     # face_recognition brick client — ws results channel
+pyyaml               # brick client reads its own compose to resolve the runner host

@@ -1,0 +1,22 @@
+# brick_compose.yaml — face_recognition runner (base / portable)
+#
+# CRITICAL: this file's EXISTENCE (by this exact base name) is what makes
+# ArduinoBrick.require_container = True. A board-specific brick_compose.<board>.yaml
+# ALONE does NOT flip that flag — get_compose_file() checks only "brick_compose.yaml".
+# So this base file must ship even though the real NPU wiring is in the ventunoq
+# override. Keep the service NAME identical across both files: the client reads
+# the first service name here to find the runner host.
+#
+# This base variant has no NPU device nodes (it is the generic fallback for a
+# board without the HTP forwarding); on ventunoq the override below adds them.
+services:
+  face-recognition-runner:
+    image: ${DOCKER_REGISTRY_BASE:-ghcr.io/arduino/}app-bricks/face-recognition-runner:0.1.0
+    restart: unless-stopped
+    ports:
+      - "4912"   # results websocket
+      - "5050"   # frame intake (TCP JPEG)
+    environment:
+      - FACE_RECOGNITION_WS_PORT=4912
+      - FACE_RECOGNITION_TCP_PORT=5050
+      - FACE_RECOGNITION_DET_THRESHOLD=${det_threshold:-0.5}

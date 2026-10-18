@@ -1,0 +1,47 @@
+# brick_compose.ventunoq.yaml — face_recognition runner (Ventuno Q / HTP v75)
+#
+# Board-specific override merged on top of brick_compose.yaml for ventunoq. It
+# forwards the kernel-coupled NPU plumbing into the runner container, modelled on
+# Arduino's stock object_detection ventunoq compose (the proven NPU-runner shape).
+#
+# IMPORTANT — what we DO and DON'T forward vs the stock ei-qnn runner:
+#   * devices  — /dev/dma_heap/system + /dev/fastrpc-cdsp  (FastRPC + ION DMA heap).
+#                Same as stock. The container runs as root (the base image's default
+#                user), so it opens these group-restricted nodes via CAP_DAC_OVERRIDE
+#                — stock uses neither group_add nor privileged, and neither do we.
+#   * model id — /sys/firmware/devicetree/base/model (the FastRPC lib reads it).
+#   * NO /usr/share/qcom mount. The stock EI runner forwards the board DSP skels
+#     because its QNN stack lives in /usr/lib. OURS uses onnxruntime-qnn, whose wheel
+#     bundles its OWN version-matched QNN 2.51 v75 skels; runner.py points
+#     ADSP_LIBRARY_PATH at those. Forwarding the board skels and pointing there mixes
+#     QNN generations -> HTP device creation fails (QNN_DEVICE_ERROR_INVALID_CONFIG)
+#     and it silently falls back to CPU. Verified on-board 2026-10-18.
+#
+# The service NAME must match brick_compose.yaml (the client resolves the runner
+# host from the first service name). Keep it face-recognition-runner.
+services:
+  face-recognition-runner:
+    image: ${DOCKER_REGISTRY_BASE:-ghcr.io/arduino/}app-bricks/face-recognition-runner:0.1.0
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    ports:
+      - "4912"
+      - "5050"
+    devices:
+      - /dev/dma_heap/system
+      - /dev/fastrpc-cdsp
+    volumes:
+      # Board model id — the FastRPC lib derives the DSP target from this node.
+      - /sys/firmware/devicetree/base/model:/run/device-model:ro
+    environment:
+      - FACE_RECOGNITION_WS_PORT=4912
+      - FACE_RECOGNITION_TCP_PORT=5050
+      - FACE_RECOGNITION_BACKEND=qnn
+      - FACE_RECOGNITION_DET_THRESHOLD=${det_threshold:-0.5}
+      # NOTE: ADSP_LIBRARY_PATH is intentionally NOT set here. runner.py sets it to
+      # the onnxruntime-qnn wheel's own bundled v75 skel dir at startup. Set
+      # FACE_RECOGNITION_KEEP_ADSP_PATH=1 only if you deliberately override it.
