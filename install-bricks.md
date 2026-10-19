@@ -22,6 +22,9 @@ On the board you need, already installed by the Ubuntu + App Lab image:
   if not, `sudo usermod -aG docker $USER` then re-login).
 - The stock App Lab data dir at `/var/lib/arduino-app-cli/assets/<ver>/` (this is
   what the private-data-dir launcher symlinks against).
+- A **USB webcam** plugged into the board — the app reads it directly (see
+  "Camera" below). Without one the app runs on synthetic frames (useful for a
+  smoke test, but no real recognition).
 
 Confirm:
 
@@ -29,11 +32,38 @@ Confirm:
 arduino-app-cli version
 docker ps
 ls /var/lib/arduino-app-cli/assets        # e.g. 0.12.0
+ls -l /dev/video*                          # expect a USB-cam node, e.g. /dev/video0
 ```
 
-A USB webcam and an HDMI display are **not** required on the board itself — the UI
-is a webview you open from any browser on the network. (The camera the demo reads
-is whatever App Lab's camera brick exposes to the runner; see the app README.)
+### Base images
+
+The runner image builds `FROM ghcr.io/arduino/app-bricks/ei-qnn-models-runner:0.12.1`,
+and `run_applab.sh` runs `ghcr.io/arduino/app-bricks/python-apps-base:0.12.0` as its
+provisioner. On a board set up with Arduino App Lab these are normally already
+present:
+
+```bash
+docker images | grep -E "ei-qnn-models-runner|python-apps-base"
+```
+
+If either is missing, the board needs network egress to `ghcr.io` to pull them
+(`docker pull ghcr.io/arduino/app-bricks/ei-qnn-models-runner:0.12.1` and
+`…/python-apps-base:0.12.0`). Do this once before step 3/4.
+
+### Camera
+
+The app container reads the camera **directly** via V4L2: `CameraThread` probes
+`/dev/video*` and opens the first node that yields a real frame (falling back to
+synthetic frames if none do). App Lab bind-mounts the whole host `/dev` into the
+app container and adds the matching device-cgroup rule, so a USB webcam that
+enumerates on the host (e.g. `/dev/video0`) is visible to the app with **no
+per-app configuration** — nothing in `app.yaml` or the brick composes forwards the
+camera. Just make sure the webcam is plugged in and shows up in `ls /dev/video*`
+on the host before launching. (Verified on-board 2026-10-18: app logs
+`[Camera] Opened /dev/video0`.)
+
+An HDMI display is **not** required — the UI is a webview you open from any browser
+on the network (step 5).
 
 ---
 
@@ -189,6 +219,8 @@ A providers list that **starts** with `CPUExecutionProvider` means QNN didn't lo
 | Runner can't find the models | Stage them in `runner/models/buffalo_sc/` before building (step 2), or mount them at `/opt/models/buffalo_sc`. |
 | `providers` starts with `CPUExecutionProvider` | HTP didn't initialize. Confirm `/dev/fastrpc-cdsp` + `/dev/dma_heap/system` are forwarded (they're in `brick_compose.ventunoq.yaml`) and that `ADSP_LIBRARY_PATH` points at the wheel's skels, not the board's. |
 | Compose can't pull the runner image | Build it locally tagged under `ghcr.io/arduino/` (step 3), or set `DOCKER_REGISTRY_BASE`. |
+| App shows a synthetic/animated face, not the camera | No USB webcam detected. Confirm `ls /dev/video*` on the host shows a cam node and that the app logs `[Camera] Opened /dev/videoN` (not `No camera — using synthetic frames`). |
+| `docker pull` of a base image fails | The board needs egress to `ghcr.io` for `ei-qnn-models-runner:0.12.1` + `python-apps-base:0.12.0` (see "Base images" in §0). |
 
 ---
 

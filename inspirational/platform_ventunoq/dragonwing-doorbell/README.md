@@ -28,6 +28,12 @@ narrative that connects the two.
 `doorbell.py`. It is imported, not forked — so UI/behavior stay in lockstep with
 the production app. Only the two I/O ends change (below).
 
+> **Camera:** the app reads the webcam **directly** — `CameraThread` probes
+> `/dev/video*` and opens the first node that yields a frame (synthetic-frame
+> fallback if none do). App Lab bind-mounts the host `/dev` into the app container,
+> so a plugged-in USB cam just works; nothing here forwards it explicitly. Plug a
+> webcam in before launching, or the demo runs on synthetic frames.
+
 ## Architecture — two I/O swaps, nothing else
 
 ```
