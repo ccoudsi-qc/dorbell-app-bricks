@@ -138,18 +138,67 @@ with no registry push. If you push it elsewhere, set `DOCKER_REGISTRY_BASE`.
 
 ## 4. Start the app
 
-A plain `arduino-app-cli app start` **fails** here, because the
-`arduino:face_recognition` brick lives *inside* the app and so is absent from the
-stock static registry:
+A plain `arduino-app-cli app start` (and the App Lab UI's **Run** button) validates
+every brick in `app.yaml` against the **stock** registry at
+`/var/lib/arduino-app-cli/assets/<ver>/bricks-list.yaml`. The
+`arduino:face_recognition` brick lives *inside* the app, so out of the box it is
+absent from that registry and you get:
 
 ```
 [ERROR] Brick "arduino:face_recognition" Not Found
 ```
 
-`run_applab.sh` solves this without editing a single stock file: it builds a
-**private data dir** (`ARDUINO_APP_CLI__DATA_DIR`) whose registry = stock + our
-brick, regenerated with the **same provisioner the daemon uses**, then starts the
-app against it.
+There are **two ways** to launch, depending on whether you want full isolation or
+UI integration. Pick one.
+
+### 4A. Install the brick into App Lab — run it like a stock app *(recommended)*
+
+This registers the brick into App Lab's **stock** data dir so the app behaves
+exactly like the built-in examples (e.g. *Face Detector on Camera*): the App Lab
+**Stop/Run** buttons work, and the kiosk **auto-opens the webview on the board
+screen**.
+
+```bash
+cd ~/ArduinoApps/dragonwing-doorbell
+bash install-brick.sh
+```
+
+`install-brick.sh` is **additive and reversible**. It:
+
+1. runs the **same provisioner the daemon uses** (`arduino-bricks-list-modules` in
+   the `python-apps-base` image) to generate the brick's registry entry + compose
+   — no hand-authored YAML;
+2. **backs up** the stock `bricks-list.yaml` (to `~/.doorbell-stock-backup/<ts>/`);
+3. **appends only** the `arduino:face_recognition` entry to the stock registry
+   (no stock brick is modified);
+4. copies **only** `compose/arduino/face_recognition/` into the stock compose tree;
+5. **restarts the daemon** so it reloads the registry.
+
+> **Step 5 is not optional.** The `arduino-app-cli` daemon caches the brick list in
+> memory at startup, so editing the registry file alone leaves the UI still
+> reporting `Brick not found`. The script restarts the daemon for you (it will use
+> `sudo`, which prompts in a terminal); if it can't restart automatically it prints
+> the one command to run:
+> ```bash
+> sudo systemctl restart arduino-app-cli.service
+> ```
+
+After that, open App Lab, select **Dragonwing Doorbell**, and hit **Run** — the
+containers come up and the webview opens on the board. To go back to pristine
+stock at any time:
+
+```bash
+bash install-brick.sh --uninstall      # restores the registry backup + removes the compose dir + restarts the daemon
+```
+
+### 4B. Launch isolated, without touching the stock data dir
+
+If you'd rather not modify the stock data dir at all (strict isolation), use
+`run_applab.sh`. It builds a **private data dir** (`ARDUINO_APP_CLI__DATA_DIR`)
+whose registry = stock + our brick, regenerated with the same provisioner, then
+starts the app against it — **without editing any stock file**. The trade-off: the
+App Lab UI and the on-screen kiosk don't see the app, so you launch (and open the
+webview) yourself.
 
 ```bash
 cd ~/ArduinoApps/dragonwing-doorbell
@@ -170,7 +219,9 @@ bash run_applab.sh
 
 ## 5. Open the webview
 
-App Lab opens the webview automatically; otherwise browse to:
+If you used **4A**, the App Lab kiosk opens the webview automatically on the board
+screen when the app starts (like the stock examples). Otherwise — or from another
+machine — browse to:
 
 ```
 http://<board>:7000
@@ -214,7 +265,8 @@ A providers list that **starts** with `CPUExecutionProvider` means QNN didn't lo
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| `Brick "arduino:face_recognition" Not Found` | You ran a plain `app start`. Use `run_applab.sh` (step 4). |
+| `Brick "arduino:face_recognition" Not Found` (UI Run, or plain `app start`) | The custom brick isn't in the stock registry. Install it with `install-brick.sh` (step 4A), or launch via `run_applab.sh` (step 4B). |
+| UI **still** says `Brick not found` right after `install-brick.sh` | The daemon caches the registry in memory. Restart it: `sudo systemctl restart arduino-app-cli.service` (the script does this; it's needed if the auto-restart was skipped). |
 | Webview stuck at "Connecting… / offline" | The bundled Socket.IO client (`assets/libs/socket.io.min.js`) must match the server's Socket.IO v4. It's committed in this repo; don't point the script tag at `/socket.io/socket.io.js` (that's the Engine.IO server, which returns HTTP 400). |
 | Runner can't find the models | Stage them in `runner/models/buffalo_sc/` before building (step 2), or mount them at `/opt/models/buffalo_sc`. |
 | `providers` starts with `CPUExecutionProvider` | HTP didn't initialize. Confirm `/dev/fastrpc-cdsp` + `/dev/dma_heap/system` are forwarded (they're in `brick_compose.ventunoq.yaml`) and that `ADSP_LIBRARY_PATH` points at the wheel's skels, not the board's. |
