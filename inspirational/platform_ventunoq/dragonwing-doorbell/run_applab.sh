@@ -120,9 +120,13 @@ if [ "$need_build" = 1 ]; then
     trap 'rm -rf "$tmp_out"' EXIT
 
     # 3a. bricks-list.yaml — plain mode emits the COMPLETE list (stock + FR).
+    # --model-output "" disables arduino-bricks-list-modules' default copy to
+    # /app/.cache/models-list.yaml: that dir is never created under the
+    # bind-mounted $APP_DIR, so the tool crashes with FileNotFoundError. We
+    # don't need the models file here — only bricks-list.yaml and compose/.
     docker run --rm --entrypoint arduino-bricks-list-modules \
         -v "$APP_DIR":/app -v "$tmp_out":/out \
-        "$BASE_IMAGE" -o /out/bricks-list.yaml >/dev/null
+        "$BASE_IMAGE" --model-output "" -o /out/bricks-list.yaml >/dev/null
     grep -q "arduino:face_recognition" "$tmp_out/bricks-list.yaml" \
         || die "scanner did not discover arduino:face_recognition — check the brick's import path/brick_config.yaml"
     cp "$tmp_out/bricks-list.yaml" "$PRIV_ASSETS/bricks-list.yaml"

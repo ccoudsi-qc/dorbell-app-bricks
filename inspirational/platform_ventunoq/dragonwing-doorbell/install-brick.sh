@@ -117,9 +117,13 @@ log "scanning app for bricks (provisioner: $BASE_IMAGE)"
 tmp_out="$(mktemp -d)"; chmod 777 "$tmp_out"
 trap 'rm -rf "$tmp_out"' EXIT
 
+# --model-output "" disables arduino-bricks-list-modules' default copy to
+# /app/.cache/models-list.yaml: that dir is never created under the bind-mounted
+# $APP_DIR, so the tool crashes with FileNotFoundError. We don't need the models
+# file here anyway — only bricks-list.yaml and the compose tree.
 docker run --rm --entrypoint arduino-bricks-list-modules \
     -v "$APP_DIR":/app -v "$tmp_out":/out \
-    "$BASE_IMAGE" -o /out/bricks-list.yaml >/dev/null
+    "$BASE_IMAGE" --model-output "" -o /out/bricks-list.yaml >/dev/null
 grep -q "$BRICK_ID" "$tmp_out/bricks-list.yaml" \
     || die "scanner did not discover $BRICK_ID — check the brick's import path/brick_config.yaml"
 
